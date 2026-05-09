@@ -1,0 +1,4 @@
+aiohttp>=3.9,<4
+msgpack>=1.0
+protobuf>=4.25
+graphql-core>=3.2,<4

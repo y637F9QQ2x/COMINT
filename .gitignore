@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+bin/
+.gradle/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local Claude Code instructions and config — never committed
+CLAUDE.md
+.claude/
+.mcp.json
