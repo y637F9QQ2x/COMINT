@@ -1,9 +1,10 @@
 package com.comint.ui;
 
 import javax.swing.table.AbstractTableModel;
-import java.text.SimpleDateFormat;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
@@ -13,16 +14,23 @@ import java.util.Locale;
  */
 public class ComintTrafficTableModel extends AbstractTableModel {
 
-    public static final int CAP = 10000;
+    /** R26: storage cap. Entries hold lazy references (HttpRequest/HttpResponse — Burp
+     *  manages the backing memory) plus only the raw WS payload bytes/string for
+     *  message frames; decoded JSON is computed on demand by the panel. */
+    public static final int CAP = 100000;
 
     private static final String[] COLS = {
-            "No.", "Timestamp", "Host", "Method", "URL", "Protocol", "Codec", "Status", "Length"
+            "No.", "Timestamp", "Host", "Method", "Source", "URL", "Protocol", "Codec", "Status", "Length"
     };
 
     private final List<ComintTrafficEntry> entries = new ArrayList<>();
     // R19: yyyy-MM-dd HH:mm:ss.SSS with Locale.ROOT to keep formatting identical
     // regardless of the JVM's default locale (some locales reorder day/month).
-    private final SimpleDateFormat tsFmt = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT);
+    // Audit fix: DateTimeFormatter is immutable + thread-safe (SimpleDateFormat
+    // wasn't, even though we're EDT-only by convention).
+    private static final DateTimeFormatter TS_FMT = DateTimeFormatter
+            .ofPattern("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT)
+            .withZone(ZoneId.systemDefault());
 
     public void addEntry(ComintTrafficEntry entry) {
         if (entry == null) return;
@@ -72,8 +80,9 @@ public class ComintTrafficTableModel extends AbstractTableModel {
 
     @Override
     public Class<?> getColumnClass(int col) {
+        // No (0), Status (8), Length (9) — Integer; everything else String.
         return switch (col) {
-            case 0, 7, 8 -> Integer.class;
+            case 0, 8, 9 -> Integer.class;
             default -> String.class;
         };
     }
@@ -89,14 +98,15 @@ public class ComintTrafficTableModel extends AbstractTableModel {
         if (e == null) return "";
         return switch (col) {
             case 0 -> Integer.valueOf(e.id);
-            case 1 -> tsFmt.format(new Date(e.timestamp));
+            case 1 -> TS_FMT.format(Instant.ofEpochMilli(e.timestamp));
             case 2 -> e.host;
             case 3 -> e.method;
-            case 4 -> e.url;
-            case 5 -> e.protocol;
-            case 6 -> e.codec;
-            case 7 -> Integer.valueOf(e.statusCode);
-            case 8 -> Integer.valueOf(e.length);
+            case 4 -> e.source;
+            case 5 -> e.url;
+            case 6 -> e.protocol;
+            case 7 -> e.codec;
+            case 8 -> Integer.valueOf(e.statusCode);
+            case 9 -> Integer.valueOf(e.length);
             default -> "";
         };
     }

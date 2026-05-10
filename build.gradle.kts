@@ -27,6 +27,11 @@ dependencies {
     implementation("org.msgpack:jackson-dataformat-msgpack:0.9.8")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
     implementation("com.graphql-java:graphql-java:22.3")
+    // NanoHTTPD: embedded HTTP server for the WS Bridge. Burp's bundled JRE
+    // does not ship the jdk.httpserver module, so com.sun.net.httpserver is
+    // unavailable. NanoHTTPD is a single ~50KB pure-Java alternative —
+    // relocated below so it can't clash with anything else on Burp's classpath.
+    implementation("org.nanohttpd:nanohttpd:2.3.1")
 
     // Tests
     testImplementation("org.junit.jupiter:junit-jupiter:5.10.3")
@@ -46,6 +51,7 @@ tasks.shadowJar {
     relocate("com.fasterxml.jackson", "com.comint.shaded.jackson")
     relocate("org.msgpack", "com.comint.shaded.msgpack")
     relocate("graphql", "com.comint.shaded.graphql")
+    relocate("fi.iki.elonen", "com.comint.shaded.nanohttpd")
     relocate("org.antlr", "com.comint.shaded.antlr")
     relocate("org.reactivestreams", "com.comint.shaded.reactivestreams")
     relocate("org.dataloader", "com.comint.shaded.dataloader")

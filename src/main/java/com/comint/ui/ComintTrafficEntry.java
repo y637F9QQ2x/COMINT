@@ -23,6 +23,9 @@ public final class ComintTrafficEntry {
     public final int statusCode;    // 0 for non-HTTP
     public final String reason;     // empty for non-HTTP
     public final int length;
+    /** R25: originating Burp tool — "Proxy" / "Repeater" / "Intruder" / "Scanner" /
+     *  "Extension" / "Bridge" / "WebSocket" / tool's own name for unknowns. */
+    public final String source;
 
     public final HttpRequest httpRequest;
     public final HttpResponse httpResponse;
@@ -49,6 +52,7 @@ public final class ComintTrafficEntry {
         this.statusCode = b.statusCode;
         this.reason = b.reason == null ? "" : b.reason;
         this.length = b.length;
+        this.source = b.source == null ? "" : b.source;
         this.httpRequest = b.httpRequest;
         this.httpResponse = b.httpResponse;
         this.wsUpgradeRequest = b.wsUpgradeRequest;
@@ -71,6 +75,7 @@ public final class ComintTrafficEntry {
         int statusCode;
         String reason;
         int length;
+        String source;
         HttpRequest httpRequest;
         HttpResponse httpResponse;
         HttpRequest wsUpgradeRequest;
@@ -89,6 +94,7 @@ public final class ComintTrafficEntry {
         public Builder statusCode(int v) { this.statusCode = v; return this; }
         public Builder reason(String v) { this.reason = v; return this; }
         public Builder length(int v) { this.length = v; return this; }
+        public Builder source(String v) { this.source = v; return this; }
         public Builder httpRequest(HttpRequest v) { this.httpRequest = v; return this; }
         public Builder httpResponse(HttpResponse v) { this.httpResponse = v; return this; }
         public Builder wsUpgradeRequest(HttpRequest v) { this.wsUpgradeRequest = v; return this; }

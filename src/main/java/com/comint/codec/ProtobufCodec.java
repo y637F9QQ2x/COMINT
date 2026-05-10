@@ -93,7 +93,12 @@ public class ProtobufCodec implements ProtocolCodec {
                 throw new RuntimeException("Protobuf encode: top-level must be a JSON object");
             }
             UnknownFieldSet ufs = jsonToUfs((ObjectNode) root, 0);
-            return ufs.toByteArray();
+            byte[] out = ufs.toByteArray();
+            // Audit fix: enforce the 32MB cap on encode output too.
+            if (out != null && out.length > MAX_PAYLOAD_BYTES) {
+                throw new RuntimeException("Protobuf encode: result exceeds 32MB cap");
+            }
+            return out;
         } catch (RuntimeException e) {
             throw e;
         } catch (Throwable t) {
@@ -264,9 +269,17 @@ public class ProtobufCodec implements ProtocolCodec {
                     case "varint":
                         fb.addVarint(valueAsLong(valueNode, key));
                         break;
-                    case "fixed32":
-                        fb.addFixed32((int) valueAsLong(valueNode, key));
+                    case "fixed32": {
+                        // Audit fix: range-check before narrowing — a fixed32 field can hold any
+                        // 0..0xFFFFFFFF unsigned value. Cast-truncation silently produced wrong
+                        // wire bytes when the user supplied something outside int range.
+                        long v = valueAsLong(valueNode, key);
+                        if (v < (long) Integer.MIN_VALUE || v > 0xFFFFFFFFL) {
+                            throw new RuntimeException("Protobuf encode: fixed32 field " + key + " value out of range");
+                        }
+                        fb.addFixed32((int) v);
                         break;
+                    }
                     case "fixed64":
                         fb.addFixed64(valueAsLong(valueNode, key));
                         break;
@@ -314,13 +327,30 @@ public class ProtobufCodec implements ProtocolCodec {
             throw new RuntimeException("Protobuf encode: field " + key + " value missing");
         }
         if (v.isNumber()) {
-            return v.asLong();
+            // Audit fix: protobuf varint/fixed64 fields can carry uint64 values up to
+            // 2^64-1 which don't fit in a signed long. Jackson's asLong() silently
+            // truncates BigIntegers and large doubles. Reject out-of-range numbers
+            // rather than emit wrong wire bytes; user can re-encode as a string.
+            if (v.canConvertToLong()) {
+                return v.asLong();
+            }
+            throw new RuntimeException("Protobuf encode: field " + key
+                    + " numeric value does not fit in 64-bit signed long; supply as string for uint64");
         }
         if (v.isTextual()) {
+            String text = v.asText();
             try {
-                return Long.parseLong(v.asText());
+                return Long.parseLong(text);
             } catch (NumberFormatException nfe) {
-                throw new RuntimeException("Protobuf encode: field " + key + " value not numeric: " + v.asText());
+                // Audit fix: try uint64 parsing too — Long.parseUnsignedLong handles
+                // values up to 2^64-1 by reinterpreting the result's bit pattern as
+                // unsigned, which is the same wire-format encoding protobuf uses for
+                // varint/fixed64 unsigned fields.
+                try {
+                    return Long.parseUnsignedLong(text);
+                } catch (NumberFormatException nfe2) {
+                    throw new RuntimeException("Protobuf encode: field " + key + " value not numeric: " + text);
+                }
             }
         }
         throw new RuntimeException("Protobuf encode: field " + key + " value not numeric");

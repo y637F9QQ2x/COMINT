@@ -8,17 +8,19 @@ class ComintTrafficTableModelTest {
 
     @Test
     void columnHeadersMatchSpec() {
+        // R25: "Source" column inserted between Method (3) and URL (5). Total = 10.
         ComintTrafficTableModel m = new ComintTrafficTableModel();
-        assertEquals(9, m.getColumnCount());
+        assertEquals(10, m.getColumnCount());
         assertEquals("No.", m.getColumnName(0));
         assertEquals("Timestamp", m.getColumnName(1));
         assertEquals("Host", m.getColumnName(2));
         assertEquals("Method", m.getColumnName(3));
-        assertEquals("URL", m.getColumnName(4));
-        assertEquals("Protocol", m.getColumnName(5));
-        assertEquals("Codec", m.getColumnName(6));
-        assertEquals("Status", m.getColumnName(7));
-        assertEquals("Length", m.getColumnName(8));
+        assertEquals("Source", m.getColumnName(4));
+        assertEquals("URL", m.getColumnName(5));
+        assertEquals("Protocol", m.getColumnName(6));
+        assertEquals("Codec", m.getColumnName(7));
+        assertEquals("Status", m.getColumnName(8));
+        assertEquals("Length", m.getColumnName(9));
     }
 
     @Test
@@ -27,13 +29,15 @@ class ComintTrafficTableModelTest {
         ComintTrafficEntry e = ComintTrafficEntry.builder()
                 .id(1).host("example.com").method("GET").url("https://example.com/api")
                 .protocol("HTTPS").codec("Protobuf").statusCode(200).reason("OK").length(123)
+                .source("Repeater")
                 .build();
         m.addEntry(e);
         assertEquals(1, m.getRowCount());
         assertEquals("example.com", m.getValueAt(0, 2));
         assertEquals("GET", m.getValueAt(0, 3));
-        assertEquals("Protobuf", m.getValueAt(0, 6));
-        assertEquals(Integer.valueOf(200), m.getValueAt(0, 7));
+        assertEquals("Repeater", m.getValueAt(0, 4));
+        assertEquals("Protobuf", m.getValueAt(0, 7));
+        assertEquals(Integer.valueOf(200), m.getValueAt(0, 8));
     }
 
     @Test

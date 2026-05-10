@@ -73,6 +73,10 @@ public class ComintRequestEditor implements ExtensionProvidedHttpRequestEditor {
                 return false;
             }
             if (request == null) return false;
+            // WS-10: never show the COMINT editor tab on a WebSocket upgrade — its
+            // body is empty and it has no codec match anyway, but we want an explicit
+            // guard so the editor stays hidden in Proxy/Repeater views.
+            if (isWebSocketUpgrade(request)) return false;
             Optional<ProtocolCodec> codec = codecRegistry.codecForRequest(request);
             return codec.isPresent();
         } catch (Throwable t) {
@@ -191,6 +195,24 @@ public class ComintRequestEditor implements ExtensionProvidedHttpRequestEditor {
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /** WS-10: a WebSocket upgrade carries `Upgrade: websocket` (and usually
+     *  `Connection: Upgrade`). Either header alone is enough to recognise it. */
+    private static boolean isWebSocketUpgrade(HttpRequest request) {
+        try {
+            String upgrade = request.headerValue("Upgrade");
+            if (upgrade != null && upgrade.toLowerCase(java.util.Locale.ROOT).contains("websocket")) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
+        try {
+            String connection = request.headerValue("Connection");
+            if (connection != null && connection.toLowerCase(java.util.Locale.ROOT).contains("upgrade")) {
+                return true;
+            }
+        } catch (Throwable ignored) {}
+        return false;
     }
 
     private static String safeMessage(Throwable t) {

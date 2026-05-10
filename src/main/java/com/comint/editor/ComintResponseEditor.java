@@ -72,6 +72,9 @@ public class ComintResponseEditor implements ExtensionProvidedHttpResponseEditor
                 return false;
             }
             if (response == null) return false;
+            // WS-10: hide the COMINT response tab on the 101 Switching Protocols
+            // half of a WebSocket upgrade — there's no body to decode.
+            if (isWebSocketUpgrade(request, response)) return false;
             Optional<ProtocolCodec> codec = codecRegistry.codecForResponse(response, request);
             return codec.isPresent();
         } catch (Throwable t) {
@@ -186,6 +189,29 @@ public class ComintResponseEditor implements ExtensionProvidedHttpResponseEditor
         } catch (Throwable t) {
             return null;
         }
+    }
+
+    /** WS-10: detect the WebSocket upgrade pair — request has Upgrade: websocket
+     *  (or Connection: Upgrade), or the response is 101 Switching Protocols. */
+    private static boolean isWebSocketUpgrade(HttpRequest request, HttpResponse response) {
+        try {
+            if (response != null && response.statusCode() == 101) return true;
+        } catch (Throwable ignored) {}
+        if (request != null) {
+            try {
+                String upgrade = request.headerValue("Upgrade");
+                if (upgrade != null && upgrade.toLowerCase(java.util.Locale.ROOT).contains("websocket")) {
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+            try {
+                String connection = request.headerValue("Connection");
+                if (connection != null && connection.toLowerCase(java.util.Locale.ROOT).contains("upgrade")) {
+                    return true;
+                }
+            } catch (Throwable ignored) {}
+        }
+        return false;
     }
 
     private static String safeMessage(Throwable t) {

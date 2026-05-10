@@ -39,7 +39,12 @@ public final class WebSocketCodec {
         if (payload == null) {
             return wrap("text_empty", "");
         }
-        if (payload.length() > MAX_PAYLOAD_BYTES) {
+        // Audit fix: MAX_PAYLOAD_BYTES is a byte budget, not a char budget. UTF-16
+        // chars range up to 4 bytes apiece in UTF-8 — a 32M-char string can encode
+        // to ~128 MB. Use the encoded byte length so the cap is consistent with the
+        // 32 MB limit applied everywhere else.
+        if (payload.length() > MAX_PAYLOAD_BYTES
+                || payload.getBytes(StandardCharsets.UTF_8).length > MAX_PAYLOAD_BYTES) {
             return "/* COMINT WebSocket: text payload too large (" + payload.length() + " chars) */";
         }
         try {
@@ -95,36 +100,42 @@ public final class WebSocketCodec {
         if (trimmed.startsWith("/*")) {
             throw new RuntimeException("WebSocket encode: refusing to encode error placeholder");
         }
+        String result;
         try {
             JsonNode root = jsonMapper.readTree(trimmed);
             if (root == null || !root.isObject()) {
-                // Not a recognized envelope — emit verbatim so users can free-form edit.
-                return readable;
-            }
-            String kind = root.path("kind").asText("");
-            if ("text".equals(kind) || "text_empty".equals(kind)) {
-                JsonNode v = root.get("value");
-                return (v != null && v.isTextual()) ? v.asText() : "";
-            }
-            if ("json".equals(kind)) {
-                JsonNode v = root.get("value");
-                if (v == null) return "";
-                return compactMapper.writeValueAsString(v);
-            }
-            if ("graphql_ws".equals(kind)) {
-                JsonNode envelope = root.get("envelope");
-                if (envelope == null || !envelope.isObject()) {
-                    throw new RuntimeException("WebSocket encode: graphql_ws envelope missing");
+                result = readable;
+            } else {
+                String kind = root.path("kind").asText("");
+                if ("text".equals(kind) || "text_empty".equals(kind)) {
+                    JsonNode v = root.get("value");
+                    result = (v != null && v.isTextual()) ? v.asText() : "";
+                } else if ("json".equals(kind)) {
+                    JsonNode v = root.get("value");
+                    result = v == null ? "" : compactMapper.writeValueAsString(v);
+                } else if ("graphql_ws".equals(kind)) {
+                    JsonNode envelope = root.get("envelope");
+                    if (envelope == null || !envelope.isObject()) {
+                        throw new RuntimeException("WebSocket encode: graphql_ws envelope missing");
+                    }
+                    result = compactMapper.writeValueAsString(envelope);
+                } else {
+                    // Unknown kind — emit verbatim so users can hand-edit to whatever they need.
+                    result = readable;
                 }
-                return compactMapper.writeValueAsString(envelope);
             }
-            // Unknown kind — emit verbatim so users can hand-edit to whatever they need.
-            return readable;
         } catch (RuntimeException e) {
             throw e;
         } catch (Throwable t) {
             throw new RuntimeException("WebSocket text encode failed: " + safeMsg(t), t);
         }
+        // Audit fix: encode-side cap mirroring decodeText. Cheap byte-length check
+        // catches malicious blow-ups (e.g. JSON expanded into a 100MB string).
+        if (result.length() > MAX_PAYLOAD_BYTES
+                || result.getBytes(StandardCharsets.UTF_8).length > MAX_PAYLOAD_BYTES) {
+            throw new RuntimeException("WebSocket text encode: result exceeds 32MB cap");
+        }
+        return result;
     }
 
     /** Decode a binary WebSocket payload. Detection order: MessagePack → Protobuf → raw bytes. */
@@ -173,6 +184,7 @@ public final class WebSocketCodec {
         if (trimmed.startsWith("/*")) {
             throw new RuntimeException("WebSocket encode: refusing to encode error placeholder");
         }
+        byte[] out;
         try {
             JsonNode root = jsonMapper.readTree(trimmed);
             if (root == null || !root.isObject()) {
@@ -185,29 +197,33 @@ public final class WebSocketCodec {
                 String b64 = v.asText();
                 if (b64.isEmpty()) return new byte[0];
                 try {
-                    return Base64.getDecoder().decode(b64);
+                    out = Base64.getDecoder().decode(b64);
                 } catch (IllegalArgumentException ex) {
                     throw new RuntimeException("WebSocket encode: invalid base64");
                 }
-            }
-            if ("msgpack".equals(kind)) {
+            } else if ("msgpack".equals(kind)) {
                 if (v == null) return new byte[0];
                 Object obj = compactMapper.treeToValue(v, Object.class);
-                return msgpackMapper.writeValueAsBytes(obj);
-            }
-            if ("protobuf".equals(kind)) {
+                out = msgpackMapper.writeValueAsBytes(obj);
+            } else if ("protobuf".equals(kind)) {
                 if (v == null || !v.isObject()) {
                     throw new RuntimeException("WebSocket encode: protobuf 'value' must be object");
                 }
                 UnknownFieldSet ufs = ProtobufCodec.jsonToUfs((ObjectNode) v, 0);
-                return ufs.toByteArray();
+                out = ufs.toByteArray();
+            } else {
+                throw new RuntimeException("WebSocket encode: unknown binary kind '" + kind + "'");
             }
-            throw new RuntimeException("WebSocket encode: unknown binary kind '" + kind + "'");
         } catch (RuntimeException e) {
             throw e;
         } catch (Throwable t) {
             throw new RuntimeException("WebSocket binary encode failed: " + safeMsg(t), t);
         }
+        // Audit fix: enforce the 32MB cap on encode output.
+        if (out != null && out.length > MAX_PAYLOAD_BYTES) {
+            throw new RuntimeException("WebSocket binary encode: result exceeds 32MB cap");
+        }
+        return out == null ? new byte[0] : out;
     }
 
     private boolean hasPersistedQuery(JsonNode obj) {
@@ -245,11 +261,6 @@ public final class WebSocketCodec {
         } catch (Throwable t) {
             return "{}";
         }
-    }
-
-    @SuppressWarnings("unused")
-    private static byte[] toBytes(String s) {
-        return s == null ? new byte[0] : s.getBytes(StandardCharsets.UTF_8);
     }
 
     private static String safeMsg(Throwable t) {

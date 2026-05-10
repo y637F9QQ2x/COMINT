@@ -19,6 +19,7 @@ import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JTextField;
@@ -51,9 +52,6 @@ import java.util.Locale;
  * progress as files are written.
  */
 public class ComintExportDialog extends JDialog {
-
-    private static final String[] L_INDEX_KEYS = {"highlight","show","showAll","visibleOnly","hiddenOnly",
-            "hideSelected","unhideSelected","search","exportLogs","raw","decoded","outputDir","export","cancel"};
 
     private final MontoyaApi api;
     private final ComintTrafficTableModel model;
@@ -264,6 +262,22 @@ public class ComintExportDialog extends JDialog {
             @Override
             protected void done() {
                 setUiEnabled(true);
+                int written = 0;
+                try { written = get(); } catch (Throwable ignored) {}
+                int wanted = (wantRaw ? 1 : 0) + (wantDecoded ? 1 : 0);
+                // Audit fix: surface partial/total failures instead of silently
+                // dispose()-ing — the user otherwise gets no signal that nothing
+                // (or only half) of their export ran.
+                if (written < wanted) {
+                    try {
+                        String msg = (written == 0)
+                                ? "Export failed — no files were written. See COMINT log for details."
+                                : "Export partial — " + written + " of " + wanted
+                                + " file(s) written. See COMINT log for details.";
+                        JOptionPane.showMessageDialog(ComintExportDialog.this, msg,
+                                "COMINT Export", JOptionPane.WARNING_MESSAGE);
+                    } catch (Throwable ignored) {}
+                }
                 dispose();
             }
         }.execute();
@@ -424,7 +438,4 @@ public class ComintExportDialog extends JDialog {
         return (m == null || m.isEmpty()) ? t.getClass().getSimpleName() : m;
     }
 
-    /** Compile-time check that the labels array stays parallel to the indices used here. */
-    @SuppressWarnings("unused")
-    private static final int LABELS_SIZE_CHECK = L_INDEX_KEYS.length;
 }

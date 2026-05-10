@@ -335,10 +335,22 @@ public class GraphQLCodec implements ProtocolCodec {
             ObjectNode env = compactMapper.createObjectNode();
             // If no [query] marker, treat the whole text as a raw query (backward-compat
             // for raw GraphQL bodies that arrive without any envelope structure).
-            String queryText = p.queryPresent ? p.query : readable;
+            // Audit fix: when ANY [variables]/[operationName] marker is present but
+            // [query] is missing, do NOT fall back to the whole `readable` text — it
+            // contains literal "[variables]" / "[operationName]" lines that would
+            // leak into the JSON envelope's "query" field. Treat the absent block
+            // as empty and let the user's variables/operationName carry through.
+            String queryText;
+            if (p.queryPresent) {
+                queryText = p.query;
+            } else if (p.varsPresent || p.operationNamePresent) {
+                queryText = "";
+            } else {
+                queryText = readable;
+            }
             env.put("query", minifyOrKeep(queryText));
             applyParsedExtras(env, p);
-            return compactMapper.writeValueAsBytes(env);
+            return capCheck(compactMapper.writeValueAsBytes(env));
         } catch (Throwable t) {
             throw new RuntimeException("GraphQL encode failed: " + safeMsg(t), t);
         }
@@ -386,7 +398,7 @@ public class GraphQLCodec implements ProtocolCodec {
                 ObjectNode env = compactMapper.createObjectNode();
                 env.put("query", minifyOrKeep(p.queryPresent ? p.query : readable));
                 applyParsedExtras(env, p);
-                return compactMapper.writeValueAsBytes(env);
+                return capCheck(compactMapper.writeValueAsBytes(env));
             } catch (Throwable t) {
                 throw new RuntimeException("GraphQL encode failed: " + safeMsg(t), t);
             }
@@ -400,7 +412,18 @@ public class GraphQLCodec implements ProtocolCodec {
                 return readable.getBytes(StandardCharsets.UTF_8);
             }
             byte first = originalBody[i];
-            String userQuery = minifyOrKeep(p.queryPresent ? p.query : readable);
+            // Audit fix: same marker-leak guard as encode(String) — if [variables]
+            // or [operationName] markers are present but [query] is missing, treat
+            // the query as empty rather than embedding the marker text.
+            String userQueryRaw;
+            if (p.queryPresent) {
+                userQueryRaw = p.query;
+            } else if (p.varsPresent || p.operationNamePresent) {
+                userQueryRaw = "";
+            } else {
+                userQueryRaw = readable;
+            }
+            String userQuery = minifyOrKeep(userQueryRaw);
 
             if (first == '{') {
                 JsonNode root;
@@ -418,7 +441,7 @@ public class GraphQLCodec implements ProtocolCodec {
                         envelope.put("query", userQuery);
                     }
                     mergeBlocksIntoEnvelope(envelope, p);
-                    return compactMapper.writeValueAsBytes(envelope);
+                    return capCheck(compactMapper.writeValueAsBytes(envelope));
                 }
                 return readable.getBytes(StandardCharsets.UTF_8);
             }
@@ -469,6 +492,14 @@ public class GraphQLCodec implements ProtocolCodec {
                 envelope.put("operationName", op);
             }
         }
+    }
+
+    /** Audit fix: enforce the 32MB cap on encode output. */
+    private static byte[] capCheck(byte[] out) {
+        if (out != null && out.length > MAX_PAYLOAD_BYTES) {
+            throw new RuntimeException("GraphQL encode: result exceeds 32MB cap");
+        }
+        return out;
     }
 
     private static String safeMsg(Throwable t) {

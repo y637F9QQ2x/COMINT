@@ -54,7 +54,19 @@ public class MessagePackCodec implements ProtocolCodec {
         }
         try {
             Object value = msgpackMapper.readValue(data, Object.class);
-            return jsonMapper.writeValueAsString(value);
+            String pretty = jsonMapper.writeValueAsString(value);
+            // Audit fix: msgpack distinguishes int/uint sizes, ext, timestamp etc.
+            // The Jackson Object mapping collapses these to plain Java types — so a
+            // re-encode may produce a different wire-format than the original. Warn
+            // the user so they don't get silent fidelity loss when sending edits.
+            try {
+                byte[] reEncoded = msgpackMapper.writeValueAsBytes(value);
+                if (!bytesEqual(reEncoded, data)) {
+                    return "/* COMINT MessagePack: lossy decode — wire format uses ext/timestamp/sized integers; re-encoded bytes will not match the original. */\n"
+                            + pretty;
+                }
+            } catch (Throwable ignored) {}
+            return pretty;
         } catch (Exception e) {
             return "/* COMINT MessagePack decode error: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()) + " */";
         }
@@ -73,11 +85,39 @@ public class MessagePackCodec implements ProtocolCodec {
             // Decode error placeholder — refuse to encode rather than corrupt.
             throw new RuntimeException("MessagePack encode: refusing to encode error placeholder");
         }
+        // Strip a leading lossy-decode warning comment so the user can edit the JSON
+        // beneath the warning and still encode successfully.
+        String body = stripLeadingComment(trimmed);
         try {
-            Object value = jsonMapper.readValue(trimmed, Object.class);
-            return msgpackMapper.writeValueAsBytes(value);
+            Object value = jsonMapper.readValue(body, Object.class);
+            byte[] out = msgpackMapper.writeValueAsBytes(value);
+            // Audit fix: enforce 32MB cap on encode output too — a maliciously crafted
+            // JSON could blow up to a multi-gigabyte msgpack blob otherwise.
+            if (out != null && out.length > MAX_PAYLOAD_BYTES) {
+                throw new RuntimeException("MessagePack encode: result exceeds 32MB cap");
+            }
+            return out;
         } catch (Exception e) {
             throw new RuntimeException("MessagePack encode failed: " + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage()), e);
         }
+    }
+
+    private static String stripLeadingComment(String s) {
+        if (s == null) return "";
+        String t = s.trim();
+        if (!t.startsWith("/*")) return s;
+        int end = t.indexOf("*/");
+        if (end < 0) return s;
+        return t.substring(end + 2).trim();
+    }
+
+    private static boolean bytesEqual(byte[] a, byte[] b) {
+        if (a == b) return true;
+        if (a == null || b == null) return false;
+        if (a.length != b.length) return false;
+        for (int i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) return false;
+        }
+        return true;
     }
 }

@@ -1,6 +1,8 @@
 package com.comint.handler;
 
 import burp.api.montoya.MontoyaApi;
+import burp.api.montoya.core.ToolSource;
+import burp.api.montoya.core.ToolType;
 import burp.api.montoya.http.HttpService;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.websocket.BinaryMessage;
@@ -50,8 +52,20 @@ public class ComintWebSocketHandler implements WebSocketCreatedHandler {
             if (webSocketCreated == null) return;
             HttpRequest upgrade = null;
             try { upgrade = webSocketCreated.upgradeRequest(); } catch (Throwable ignored) {}
+            // R25 fix: capture the originating Burp tool at creation time so every
+            // subsequent message on this connection inherits the same Source label
+            // (Proxy / Repeater / Intruder / etc.) instead of the generic "WebSocket".
+            // The COMINT bridge's outbound connections use java.net.http.WebSocket
+            // directly and never reach this handler, so anything we see here came
+            // through Burp's WebSocket subsystem.
+            String connectionSource = "WebSocket";
             try {
-                webSocketCreated.webSocket().registerMessageHandler(new PerWsHandler(upgrade));
+                ToolSource ts = webSocketCreated.toolSource();
+                String label = sourceLabelFor(ts);
+                if (label != null && !label.isEmpty()) connectionSource = label;
+            } catch (Throwable ignored) {}
+            try {
+                webSocketCreated.webSocket().registerMessageHandler(new PerWsHandler(upgrade, connectionSource));
             } catch (Throwable t) {
                 logErr("registerMessageHandler failed: " + safeMsg(t));
                 return;
@@ -73,18 +87,22 @@ public class ComintWebSocketHandler implements WebSocketCreatedHandler {
         private final String wsHost;
         private final String wsUrl;
         private final String wsProtocol;
+        /** R25 fix: originating tool captured at WebSocket-created time. */
+        private final String wsSource;
 
-        PerWsHandler(HttpRequest upgrade) {
+        PerWsHandler(HttpRequest upgrade, String source) {
             this.upgradeRequest = upgrade;
             String host = "";
             String url = "";
+            // WS-10: every WebSocket-related entry (handshake + messages) is just "WS".
+            // The transport (ws:// vs wss://) is reflected by the upgrade request's
+            // HttpService.secure() — preserved on the synthetic request via WS-9.
             String proto = "WS";
             if (upgrade != null) {
                 try {
                     HttpService svc = upgrade.httpService();
                     if (svc != null) {
                         host = svc.host() == null ? "" : svc.host();
-                        if (svc.secure()) proto = "WSS";
                     }
                 } catch (Throwable ignored) {}
                 try {
@@ -95,6 +113,7 @@ public class ComintWebSocketHandler implements WebSocketCreatedHandler {
             this.wsHost = host;
             this.wsUrl = url;
             this.wsProtocol = proto;
+            this.wsSource = (source == null || source.isEmpty()) ? "WebSocket" : source;
         }
 
         @Override
@@ -122,6 +141,7 @@ public class ComintWebSocketHandler implements WebSocketCreatedHandler {
                             .wsUpgradeRequest(upgradeRequest)
                             .wsTextPayload(payload)
                             .wsDirection(dir)
+                            .source(wsSource)
                             .build();
                     try { listener.onEntry(entry); } catch (Throwable t) { logErr("listener.onEntry (ws text): " + safeMsg(t)); }
                 }
@@ -166,6 +186,7 @@ public class ComintWebSocketHandler implements WebSocketCreatedHandler {
                             .wsUpgradeRequest(upgradeRequest)
                             .wsBinaryPayload(bytes)
                             .wsDirection(dir)
+                            .source(wsSource)
                             .build();
                     try { listener.onEntry(entry); } catch (Throwable t) { logErr("listener.onEntry (ws binary): " + safeMsg(t)); }
                 }
@@ -215,6 +236,26 @@ public class ComintWebSocketHandler implements WebSocketCreatedHandler {
             } catch (Throwable t) {
                 return "None";
             }
+        }
+    }
+
+    /** R25 fix: same mapping as ComintHttpHandler.sourceLabelFor — duplicated
+     *  intentionally to keep these handlers independent of each other. */
+    private static String sourceLabelFor(ToolSource ts) {
+        if (ts == null) return "";
+        ToolType type;
+        try { type = ts.toolType(); } catch (Throwable t) { return ""; }
+        if (type == null) return "";
+        if (type == ToolType.PROXY) return "Proxy";
+        if (type == ToolType.REPEATER) return "Repeater";
+        if (type == ToolType.INTRUDER) return "Intruder";
+        if (type == ToolType.SCANNER) return "Scanner";
+        if (type == ToolType.EXTENSIONS) return "Extension";
+        try {
+            String name = type.toolName();
+            return name == null ? "" : name;
+        } catch (Throwable t) {
+            return "";
         }
     }
 

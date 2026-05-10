@@ -262,8 +262,25 @@ public class GrpcWebCodec implements ProtocolCodec {
                 frameIndex++;
             }
             byte[] frameBytes = baos.toByteArray();
+            // Audit fix: a textEncoded request with zero frames previously
+            // round-tripped to empty bytes (decoded as a *binary* empty envelope on
+            // the next pass), losing the textEncoded flag. Emit a single zero-length
+            // data frame so the base64 wrapper is still applied and the codec can
+            // re-detect the text mode.
+            if (frameBytes.length == 0 && textEncoded) {
+                frameBytes = new byte[]{0, 0, 0, 0, 0};
+            }
+            // Audit fix: enforce the encode-side 32MB cap so a maliciously crafted
+            // JSON cannot blow up to a huge frame blob.
+            if (frameBytes.length > MAX_PAYLOAD_BYTES) {
+                throw new RuntimeException("gRPC-Web encode: result exceeds 32MB cap");
+            }
             if (textEncoded) {
-                return Base64.getEncoder().encode(frameBytes);
+                byte[] b64 = Base64.getEncoder().encode(frameBytes);
+                if (b64.length > MAX_PAYLOAD_BYTES) {
+                    throw new RuntimeException("gRPC-Web encode: base64 result exceeds 32MB cap");
+                }
+                return b64;
             }
             return frameBytes;
         } catch (RuntimeException e) {

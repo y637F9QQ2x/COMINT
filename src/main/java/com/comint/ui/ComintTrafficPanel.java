@@ -2,6 +2,7 @@ package com.comint.ui;
 
 import burp.api.montoya.MontoyaApi;
 import burp.api.montoya.core.ByteArray;
+import burp.api.montoya.http.HttpService;
 import burp.api.montoya.http.message.HttpRequestResponse;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
@@ -15,6 +16,7 @@ import burp.api.montoya.ui.editor.HttpRequestEditor;
 import burp.api.montoya.ui.editor.HttpResponseEditor;
 import burp.api.montoya.ui.editor.RawEditor;
 
+import com.comint.bridge.ComintWsBridge;
 import com.comint.codec.CodecRegistry;
 import com.comint.codec.CodecUtil;
 import com.comint.codec.ProtocolCodec;
@@ -37,34 +39,36 @@ import java.util.Comparator;
 public class ComintTrafficPanel extends JPanel implements ComintTrafficListener {
 
     private static final String CARD_HTTP = "http";
-    private static final String CARD_WS = "ws";
     private static final String CARD_EMPTY = "empty";
 
     private static final int COL_NO = 0;
     private static final int COL_TIMESTAMP = 1;
     private static final int COL_HOST = 2;
     private static final int COL_METHOD = 3;
-    private static final int COL_URL = 4;
-    private static final int COL_PROTOCOL = 5;
-    private static final int COL_CODEC = 6;
-    private static final int COL_STATUS = 7;
-    private static final int COL_LENGTH = 8;
+    private static final int COL_SOURCE = 4;
+    private static final int COL_URL = 5;
+    private static final int COL_PROTOCOL = 6;
+    private static final int COL_CODEC = 7;
+    private static final int COL_STATUS = 8;
+    private static final int COL_LENGTH = 9;
 
     private static final String PERSISTENCE_LANG_KEY = "comint.lang";
 
-    private static final String[] LANG_CODES = {"en", "ja", "ko", "zh-CN", "zh-TW"};
-    private static final String[] LANG_LABELS = {"English", "日本語", "한국어", "简体中文", "繁體中文"};
+    private static final String[] LANG_CODES = {"en", "ja", "ko", "zh-CN", "zh-TW", "ru"};
+    private static final String[] LANG_LABELS = {"English", "日本語", "한국어", "简体中文", "繁體中文", "Русский"};
     private static final String[][] HEADERS = {
             // English
-            {"No.", "Timestamp", "Host", "Method", "URL", "Protocol", "Codec", "Status", "Length"},
+            {"No.", "Timestamp", "Host", "Method", "Source", "URL", "Protocol", "Codec", "Status", "Length"},
             // Japanese
-            {"No.", "タイムスタンプ", "ホスト", "メソッド", "URL", "プロトコル", "コーデック", "ステータス", "サイズ"},
+            {"No.", "タイムスタンプ", "ホスト", "メソッド", "発信元", "URL", "プロトコル", "コーデック", "ステータス", "サイズ"},
             // Korean
-            {"No.", "타임스탬프", "호스트", "메서드", "URL", "프로토콜", "코덱", "상태", "크기"},
+            {"No.", "타임스탬프", "호스트", "메서드", "발신원", "URL", "프로토콜", "코덱", "상태", "크기"},
             // Simplified Chinese
-            {"No.", "时间戳", "主机", "方法", "URL", "协议", "编解码器", "状态", "大小"},
+            {"No.", "时间戳", "主机", "方法", "来源", "URL", "协议", "编解码器", "状态", "大小"},
             // Traditional Chinese
-            {"No.", "時間戳", "主機", "方法", "URL", "協議", "編解碼器", "狀態", "大小"},
+            {"No.", "時間戳", "主機", "方法", "來源", "URL", "協議", "編解碼器", "狀態", "大小"},
+            // Russian
+            {"No.", "Метка времени", "Хост", "Метод", "Источник", "URL", "Протокол", "Кодек", "Статус", "Размер"},
     };
 
     // R17: translations for COMINT-original UI strings, parallel to LANG_CODES.
@@ -84,6 +88,9 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
     private static final int L_CANCEL          = 13;
     private static final int L_BROWSE          = 14;
     private static final int L_STATUS_PATTERN  = 15;
+    private static final int L_WS_BRIDGE       = 16;
+    private static final int L_START           = 17;
+    private static final int L_STOP            = 18;
     private static final String[][] LABELS = {
             // English
             {"Highlight:", "Show:", "Show all", "Visible only", "Hidden only",
@@ -91,35 +98,48 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
              "Raw (before decode)", "Decoded (after decode)",
              "Output directory", "Export", "Cancel",
              "Browse...",
-             "COMINT Traffic — capturing {0} entries (cap {1})"},
+             "COMINT Traffic — capturing {0} entries (cap {1})",
+             "WS Bridge:", "Start", "Stop"},
             // Japanese
             {"ハイライト:", "表示:", "すべて表示", "表示のみ", "非表示のみ",
              "選択を非表示", "選択を再表示", "検索...", "ログ出力",
              "デコード前", "デコード後",
              "出力先", "エクスポート", "キャンセル",
              "参照...",
-             "COMINT Traffic — {0} 件キャプチャ中（上限 {1}）"},
+             "COMINT Traffic — {0} 件キャプチャ中（上限 {1}）",
+             "WS ブリッジ:", "開始", "停止"},
             // Korean
             {"하이라이트:", "표시:", "모두 표시", "표시만", "숨김만",
              "선택 숨기기", "선택 표시", "검색...", "로그 출력",
              "디코딩 전", "디코딩 후",
              "출력 경로", "내보내기", "취소",
              "찾아보기...",
-             "COMINT Traffic — {0}건 캡처 중 (최대 {1})"},
+             "COMINT Traffic — {0}건 캡처 중 (최대 {1})",
+             "WS 브리지:", "시작", "중지"},
             // Simplified Chinese
             {"高亮:", "显示:", "显示全部", "仅可见", "仅隐藏",
              "隐藏所选", "取消隐藏", "搜索...", "导出日志",
              "解码前", "解码后",
              "输出目录", "导出", "取消",
              "浏览...",
-             "COMINT Traffic — 正在捕获 {0} 条记录（上限 {1}）"},
+             "COMINT Traffic — 正在捕获 {0} 条记录（上限 {1}）",
+             "WS 桥接:", "启动", "停止"},
             // Traditional Chinese
             {"高亮:", "顯示:", "顯示全部", "僅可見", "僅隱藏",
              "隱藏所選", "取消隱藏", "搜尋...", "匯出日誌",
              "解碼前", "解碼後",
              "輸出目錄", "匯出", "取消",
              "瀏覽...",
-             "COMINT Traffic — 正在擷取 {0} 筆記錄（上限 {1}）"},
+             "COMINT Traffic — 正在擷取 {0} 筆記錄（上限 {1}）",
+             "WS 橋接:", "啟動", "停止"},
+            // Russian
+            {"Подсветка:", "Показать:", "Показать все", "Только видимые", "Только скрытые",
+             "Скрыть выбранные", "Показать выбранные", "Поиск...", "Экспорт логов",
+             "До декодирования", "После декодирования",
+             "Директория вывода", "Экспорт", "Отмена",
+             "Обзор...",
+             "COMINT Traffic — захвачено {0} записей (лимит {1})",
+             "WS Bridge:", "Запуск", "Остановка"},
     };
 
     private final MontoyaApi api;
@@ -129,7 +149,6 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
     private final TableRowSorter<ComintTrafficTableModel> sorter;
     private final HttpRequestEditor requestEditor;
     private final HttpResponseEditor responseEditor;
-    private final RawEditor wsEditor;
     private final JPanel detailCardPanel;
     private final CardLayout detailCardLayout;
     private final JSplitPane httpSplit;
@@ -158,6 +177,19 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
     // R20: persisted last-used directory key.
     private static final String PERSISTENCE_EXPORT_DIR_KEY = "comint.exportDir";
 
+    // WS-4 (revised): inline bridge controls live in the top-right toolbar.
+    private final ComintWsBridge wsBridge;
+    private JLabel bridgeLabel;
+    private JTextField bridgePortField;
+    private JButton bridgeToggleButton;
+    private JLabel bridgeStatusDot;
+    private javax.swing.Timer bridgeStatusTimer;
+
+    // Holder panels for the JSplitPane sides — they wrap the request/response editors
+    // so the underlying split pane has stable children even though contents may change.
+    private JPanel leftDetailHolder;
+    private JPanel rightDetailHolder;
+
     private int currentLangIdx = 0;
 
     private final Color colorProtobuf;
@@ -167,8 +199,13 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
     private final Color colorWebSocket;
 
     public ComintTrafficPanel(MontoyaApi api, CodecRegistry codecRegistry) {
+        this(api, codecRegistry, null);
+    }
+
+    public ComintTrafficPanel(MontoyaApi api, CodecRegistry codecRegistry, ComintWsBridge wsBridge) {
         this.api = api;
         this.codecRegistry = codecRegistry;
+        this.wsBridge = wsBridge;
         this.model = new ComintTrafficTableModel();
 
         boolean dark = false;
@@ -251,6 +288,29 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         this.langCombo = new JComboBox<>(LANG_LABELS);
         langCombo.setMaximumRowCount(LANG_LABELS.length);
         rightWrap.add(langCombo);
+
+        // WS-4 (revised): inline Bridge controls. Compact row that lives in the same
+        // top-right cluster as Search / Export / Language. The standalone "COMINT WS
+        // Bridge" suite tab is gone — these controls replace it.
+        if (wsBridge != null) {
+            rightWrap.add(Box.createHorizontalStrut(8));
+            this.bridgeLabel = new JLabel("WS Bridge:");
+            rightWrap.add(bridgeLabel);
+            this.bridgePortField = new JTextField(Integer.toString(wsBridge.port()), 5);
+            rightWrap.add(bridgePortField);
+            this.bridgeToggleButton = new JButton(wsBridge.isRunning() ? "Stop" : "Start");
+            bridgeToggleButton.addActionListener(ae -> toggleBridge());
+            rightWrap.add(bridgeToggleButton);
+            this.bridgeStatusDot = new JLabel("●"); // ●
+            bridgeStatusDot.setForeground(wsBridge.isRunning() ? new Color(0x22C55E) : new Color(0xEF4444));
+            bridgeStatusDot.setToolTipText(wsBridge.isRunning() ? "Bridge running" : "Bridge stopped");
+            rightWrap.add(bridgeStatusDot);
+
+            // Refresh state every 1.5s (the bridge can be stopped/started elsewhere).
+            this.bridgeStatusTimer = new javax.swing.Timer(1500, ae -> refreshBridgeStatus());
+            bridgeStatusTimer.start();
+        }
+
         topToolbar.add(rightWrap, BorderLayout.EAST);
 
         add(topToolbar, BorderLayout.NORTH);
@@ -298,13 +358,16 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         // ---- Detail pane (CardLayout) ----
         this.requestEditor = api.userInterface().createHttpRequestEditor(EditorOptions.READ_ONLY);
         this.responseEditor = api.userInterface().createHttpResponseEditor(EditorOptions.READ_ONLY);
-        this.wsEditor = api.userInterface().createRawEditor(EditorOptions.READ_ONLY);
 
         // R8: 50/50 default split. setDividerLocation(double) is a no-op until the
         // pane has nonzero size; install a HierarchyListener to fire it once after
         // the pane is shown, then immediately unregister.
+        this.leftDetailHolder = new JPanel(new BorderLayout());
+        this.rightDetailHolder = new JPanel(new BorderLayout());
+        leftDetailHolder.add(requestEditor.uiComponent(), BorderLayout.CENTER);
+        rightDetailHolder.add(responseEditor.uiComponent(), BorderLayout.CENTER);
         this.httpSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                requestEditor.uiComponent(), responseEditor.uiComponent());
+                leftDetailHolder, rightDetailHolder);
         httpSplit.setResizeWeight(0.5);
         httpSplit.addHierarchyListener(new java.awt.event.HierarchyListener() {
             @Override
@@ -317,9 +380,6 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
             }
         });
 
-        JPanel wsDetail = new JPanel(new BorderLayout());
-        wsDetail.add(wsEditor.uiComponent(), BorderLayout.CENTER);
-
         JPanel emptyDetail = new JPanel(new BorderLayout());
         JLabel emptyLabel = new JLabel("Select a row to inspect", SwingConstants.CENTER);
         emptyLabel.setEnabled(false);
@@ -329,7 +389,6 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         this.detailCardPanel = new JPanel(detailCardLayout);
         detailCardPanel.add(emptyDetail, CARD_EMPTY);
         detailCardPanel.add(httpSplit, CARD_HTTP);
-        detailCardPanel.add(wsDetail, CARD_WS);
         detailCardLayout.show(detailCardPanel, CARD_EMPTY);
 
         JSplitPane mainSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT, tableScroll, detailCardPanel);
@@ -387,17 +446,25 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         methodCol.setPreferredWidth(55);
         methodCol.setMaxWidth(80);
 
+        // R25: Source column — origin tool ("Proxy"/"Repeater"/...). Tight enough to
+        // avoid eating URL space; wide enough for "WebSocket" / "Extension".
+        TableColumn sourceCol = table.getColumnModel().getColumn(COL_SOURCE);
+        sourceCol.setPreferredWidth(75);
+        sourceCol.setMaxWidth(100);
+
+        // Bug 3 fix: "WS-Bridge" no longer fits under the previous 55/75 protocol budget;
+        // bumped widths so the full string + 3-digit status codes show without ellipsis.
         TableColumn protocolCol = table.getColumnModel().getColumn(COL_PROTOCOL);
-        protocolCol.setPreferredWidth(55);
-        protocolCol.setMaxWidth(75);
+        protocolCol.setPreferredWidth(75);
+        protocolCol.setMaxWidth(100);
 
         TableColumn codecCol = table.getColumnModel().getColumn(COL_CODEC);
-        codecCol.setPreferredWidth(85);
-        codecCol.setMaxWidth(110);
+        codecCol.setPreferredWidth(95);
+        codecCol.setMaxWidth(130);
 
         TableColumn statusCol = table.getColumnModel().getColumn(COL_STATUS);
-        statusCol.setPreferredWidth(45);
-        statusCol.setMaxWidth(65);
+        statusCol.setPreferredWidth(55);
+        statusCol.setMaxWidth(75);
 
         TableColumn lengthCol = table.getColumnModel().getColumn(COL_LENGTH);
         lengthCol.setPreferredWidth(60);
@@ -449,7 +516,12 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         // pattern (e.g. (a+)+b across 100k chars) cannot freeze the EDT inside
         // Pattern.compile or Matcher.find on every keystroke / row.
         if (text.length() > 256) {
-            text = text.substring(0, 256);
+            // Audit fix: never split a UTF-16 surrogate pair — an unpaired high
+            // surrogate makes the compiled pattern reject characters it should
+            // match. Back off one char if the boundary lands on a high surrogate.
+            int end = 256;
+            if (Character.isHighSurrogate(text.charAt(end - 1))) end--;
+            text = text.substring(0, end);
         }
         try {
             // (?i) prefix makes the regex case-insensitive across all visible columns.
@@ -567,16 +639,24 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         popup.addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
             @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent e) {
                 ComintTrafficEntry entry = selectedEntry();
-                boolean http = entry != null && entry.kind == ComintTrafficEntry.Kind.HTTP;
-                boolean hasReq = http && entry.httpRequest != null;
-                boolean hasResp = http && entry.httpResponse != null;
-                repeaterItem.setEnabled(hasReq);
-                intruderItem.setEnabled(hasReq);
-                organizerItem.setEnabled(hasReq);
-                comparerReqItem.setEnabled(hasReq);
-                comparerRespItem.setEnabled(hasResp);
-                activeScanItem.setEnabled(hasReq);
-                boolean anySelected = table.getSelectedRowCount() > 0;
+                // FIX 3: WS frame entries get a synthesized bridge request via
+                // effectiveRequestForTool — enable send-to-tool items for them too.
+                boolean isHttp = entry != null && entry.kind == ComintTrafficEntry.Kind.HTTP;
+                boolean isWs = isWsMessageEntry(entry);
+                boolean hasReq = (isHttp && entry.httpRequest != null) || isWs;
+                boolean hasResp = (isHttp && entry.httpResponse != null) || isWs;
+                // Audit fix: send-to-tool actions operate on a single entry — disable
+                // them under multi-select so the user doesn't silently send only the
+                // lowest-indexed row when they expected all five.
+                int selCount = table.getSelectedRowCount();
+                boolean singleRow = selCount == 1;
+                repeaterItem.setEnabled(hasReq && singleRow);
+                intruderItem.setEnabled(hasReq && singleRow);
+                organizerItem.setEnabled(hasReq && singleRow);
+                comparerReqItem.setEnabled(hasReq && singleRow);
+                comparerRespItem.setEnabled(hasResp && singleRow);
+                activeScanItem.setEnabled(hasReq && singleRow);
+                boolean anySelected = selCount > 0;
                 hideItem.setEnabled(anySelected);
                 unhideItem.setEnabled(anySelected);
             }
@@ -639,21 +719,131 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
                     else requestEditor.setRequest(HttpRequest.httpRequest());
                     if (e.httpResponse != null) responseEditor.setResponse(e.httpResponse);
                     else responseEditor.setResponse(HttpResponse.httpResponse());
+                    installPlainDetailLayout();
                     detailCardLayout.show(detailCardPanel, CARD_HTTP);
                 }
                 case WS_TEXT -> {
-                    String text = e.wsTextPayload == null ? "" : e.wsTextPayload;
-                    wsEditor.setContents(ByteArray.byteArray(text.getBytes(StandardCharsets.UTF_8)));
-                    detailCardLayout.show(detailCardPanel, CARD_WS);
+                    byte[] body = e.wsTextPayload == null ? new byte[0]
+                            : e.wsTextPayload.getBytes(StandardCharsets.UTF_8);
+                    showWsAsHttpDetail(e, body, "application/json; charset=utf-8");
                 }
                 case WS_BINARY -> {
-                    byte[] bytes = e.wsBinaryPayload == null ? new byte[0] : e.wsBinaryPayload;
-                    wsEditor.setContents(ByteArray.byteArray(bytes));
-                    detailCardLayout.show(detailCardPanel, CARD_WS);
+                    byte[] body = e.wsBinaryPayload == null ? new byte[0] : e.wsBinaryPayload;
+                    showWsAsHttpDetail(e, body, "application/octet-stream");
                 }
             }
         } catch (Throwable t) {
             logErr("updateDetailForSelection: " + safeMsg(t));
+        }
+    }
+
+    /** Render a native WebSocket frame using the same Pretty/Raw split as HTTP entries.
+     *  Synthesizes an HttpRequest/HttpResponse pair so the editors get valid messages. */
+    private void showWsAsHttpDetail(ComintTrafficEntry e, byte[] body, String contentType) {
+        boolean clientToServer = "WS →".equals(e.method);
+        int bridgePort = wsBridge != null ? safeBridgePort() : 8089;
+        String wsTarget = wsTargetUrlFor(e);
+        try {
+            HttpService svc = HttpService.httpService("127.0.0.1", bridgePort, false);
+            HttpRequest synReq = synthesizeWsBridgeRequest(svc, bridgePort, wsTarget, body, contentType);
+            HttpResponse synResp = synthesizeWsBridgeResponse(body, contentType, clientToServer);
+            requestEditor.setRequest(synReq);
+            responseEditor.setResponse(synResp);
+        } catch (Throwable t) {
+            logErr("showWsAsHttpDetail synthesize: " + safeMsg(t));
+            try { requestEditor.setRequest(HttpRequest.httpRequest()); } catch (Throwable ignored) {}
+            try { responseEditor.setResponse(HttpResponse.httpResponse()); } catch (Throwable ignored) {}
+        }
+        installPlainDetailLayout();
+        detailCardLayout.show(detailCardPanel, CARD_HTTP);
+    }
+
+    private int safeBridgePort() {
+        try { return wsBridge != null ? wsBridge.port() : 8089; }
+        catch (Throwable t) { return 8089; }
+    }
+
+    /** Best-effort ws://… or wss://… URL for the X-COMINT-WS-Target header.
+     *  Prefers the upgrade request's HttpService for accurate host/port/TLS,
+     *  falls back to scheme-rewriting the entry's URL. */
+    private static String wsTargetUrlFor(ComintTrafficEntry e) {
+        if (e.wsUpgradeRequest != null) {
+            try {
+                HttpService svc = e.wsUpgradeRequest.httpService();
+                String path = "/";
+                try {
+                    String p = e.wsUpgradeRequest.path();
+                    if (p != null && !p.isEmpty()) path = p;
+                } catch (Throwable ignored) {}
+                if (svc != null && svc.host() != null) {
+                    String scheme = svc.secure() ? "wss" : "ws";
+                    int port = svc.port();
+                    boolean defaultPort = (svc.secure() && port == 443) || (!svc.secure() && port == 80);
+                    return scheme + "://" + svc.host()
+                            + (defaultPort ? "" : ":" + port) + path;
+                }
+            } catch (Throwable ignored) {}
+        }
+        String url = e.url == null ? "" : e.url;
+        if (url.startsWith("https://")) return "wss://" + url.substring("https://".length());
+        if (url.startsWith("http://"))  return "ws://"  + url.substring("http://".length());
+        if (url.startsWith("ws://") || url.startsWith("wss://")) return url;
+        return url;
+    }
+
+    /** WS-9: synthesize a bridge POST so the user can right-click → Send to Repeater
+     *  on a WS frame and have Repeater hit the embedded bridge (which forwards the
+     *  body to the original target as a WebSocket message and returns the response). */
+    private static HttpRequest synthesizeWsBridgeRequest(HttpService svc, int bridgePort,
+                                                         String wsTarget, byte[] body,
+                                                         String contentType) {
+        StringBuilder sb = new StringBuilder(256 + body.length);
+        sb.append("POST /ws HTTP/1.1\r\n");
+        sb.append("Host: 127.0.0.1:").append(bridgePort).append("\r\n");
+        sb.append("X-COMINT-WS-Target: ").append(wsTarget == null ? "" : wsTarget).append("\r\n");
+        sb.append("Content-Type: ").append(contentType).append("\r\n");
+        sb.append("Content-Length: ").append(body.length).append("\r\n");
+        sb.append("\r\n");
+        byte[] header = sb.toString().getBytes(StandardCharsets.ISO_8859_1);
+        byte[] full = new byte[header.length + body.length];
+        System.arraycopy(header, 0, full, 0, header.length);
+        System.arraycopy(body, 0, full, header.length, body.length);
+        return HttpRequest.httpRequest(svc, ByteArray.byteArray(full));
+    }
+
+    private static HttpResponse synthesizeWsBridgeResponse(byte[] body, String contentType,
+                                                           boolean clientToServer) {
+        StringBuilder sb = new StringBuilder(128 + body.length);
+        sb.append("HTTP/1.1 200 OK\r\n");
+        sb.append("Content-Type: ").append(contentType).append("\r\n");
+        sb.append("Content-Length: ").append(body.length).append("\r\n");
+        sb.append("X-COMINT-WS-Direction: ")
+                .append(clientToServer ? "client-to-server" : "server-to-client")
+                .append("\r\n");
+        sb.append("\r\n");
+        byte[] header = sb.toString().getBytes(StandardCharsets.ISO_8859_1);
+        byte[] full = new byte[header.length + body.length];
+        System.arraycopy(header, 0, full, 0, header.length);
+        System.arraycopy(body, 0, full, header.length, body.length);
+        return HttpResponse.httpResponse(ByteArray.byteArray(full));
+    }
+
+    /** Ensure the JSplitPane holders show the bare HTTP request/response editors. */
+    private void installPlainDetailLayout() {
+        // If the editors are currently parented into the bridge tabs, move them back.
+        if (leftDetailHolder.getComponentCount() == 0
+                || leftDetailHolder.getComponent(0) != requestEditor.uiComponent()) {
+            leftDetailHolder.removeAll();
+            leftDetailHolder.add(requestEditor.uiComponent(), BorderLayout.CENTER);
+            leftDetailHolder.revalidate();
+            leftDetailHolder.repaint();
+        }
+        if (rightDetailHolder.getComponentCount() == 0
+                || rightDetailHolder.getComponent(0) != responseEditor.uiComponent()) {
+            rightDetailHolder.removeAll();
+            rightDetailHolder.add(responseEditor.uiComponent(), BorderLayout.CENTER);
+            rightDetailHolder.revalidate();
+            rightDetailHolder.repaint();
         }
     }
 
@@ -667,7 +857,10 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
             if (cbMsgPack.isSelected() && "MessagePack".equals(e.codec)) return colorMsgPack;
             if (cbGraphQL.isSelected() && ("GraphQL".equals(e.codec) || "GraphQL-WS".equals(e.codec))) return colorGraphQL;
             if (cbWebSocket.isSelected()
-                    && (e.kind == ComintTrafficEntry.Kind.WS_TEXT || e.kind == ComintTrafficEntry.Kind.WS_BINARY)) {
+                    && (e.kind == ComintTrafficEntry.Kind.WS_TEXT
+                        || e.kind == ComintTrafficEntry.Kind.WS_BINARY
+                        || "WS".equals(e.protocol)
+                        || "WS-Bridge".equals(e.protocol))) {
                 return colorWebSocket;
             }
             return null;
@@ -685,32 +878,45 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
 
     private void sendToRepeater() {
         ComintTrafficEntry e = selectedEntry();
-        if (e == null || e.httpRequest == null) return;
+        if (e == null) return;
         try {
-            HttpRequest payload = decodeRequestForTool(e.httpRequest, true);
+            HttpRequest req = effectiveRequestForTool(e);
+            if (req == null) return;
+            HttpRequest payload = isWsMessageEntry(e) ? req : decodeRequestForTool(req, true);
             api.repeater().sendToRepeater(payload);
         } catch (Throwable t) { logErr("sendToRepeater: " + safeMsg(t)); }
     }
 
     private void sendToIntruder() {
         ComintTrafficEntry e = selectedEntry();
-        if (e == null || e.httpRequest == null) return;
+        if (e == null) return;
         try {
-            HttpRequest payload = decodeRequestForTool(e.httpRequest, true);
+            HttpRequest req = effectiveRequestForTool(e);
+            if (req == null) return;
+            HttpRequest payload = isWsMessageEntry(e) ? req : decodeRequestForTool(req, true);
             api.intruder().sendToIntruder(payload);
         } catch (Throwable t) { logErr("sendToIntruder: " + safeMsg(t)); }
     }
 
     private void sendToOrganizer() {
         ComintTrafficEntry e = selectedEntry();
-        if (e == null || e.httpRequest == null) return;
+        if (e == null) return;
         try {
-            // Organizer is documentation-only — keep original Content-Type so the
-            // entry tracks as the original protocol, but show decoded bodies.
-            HttpRequest decReq = decodeRequestForTool(e.httpRequest, false);
-            HttpResponse decResp = e.httpResponse != null
-                    ? decodeResponseForTool(e.httpResponse, e.httpRequest)
-                    : null;
+            HttpRequest req = effectiveRequestForTool(e);
+            if (req == null) return;
+            HttpResponse resp = effectiveResponseForTool(e);
+            HttpRequest decReq;
+            HttpResponse decResp;
+            if (isWsMessageEntry(e)) {
+                // Synthetic bridge request/response — already JSON-shaped, no decode needed.
+                decReq = req;
+                decResp = resp;
+            } else {
+                // Organizer is documentation-only — keep original Content-Type so the
+                // entry tracks as the original protocol, but show decoded bodies.
+                decReq = decodeRequestForTool(req, false);
+                decResp = resp != null ? decodeResponseForTool(resp, req) : null;
+            }
             if (decResp != null) {
                 api.organizer().sendToOrganizer(
                         HttpRequestResponse.httpRequestResponse(decReq, decResp));
@@ -724,29 +930,90 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         ComintTrafficEntry e = selectedEntry();
         if (e == null) return;
         try {
+            HttpRequest req = effectiveRequestForTool(e);
+            HttpResponse resp = effectiveResponseForTool(e);
             if (request) {
-                if (e.httpRequest == null) return;
-                api.comparer().sendToComparer(comparerBytesForRequest(e.httpRequest));
+                if (req == null) return;
+                if (isWsMessageEntry(e)) {
+                    api.comparer().sendToComparer(req.toByteArray());
+                } else {
+                    api.comparer().sendToComparer(comparerBytesForRequest(req));
+                }
             } else {
-                if (e.httpResponse == null) return;
-                api.comparer().sendToComparer(comparerBytesForResponse(e.httpResponse, e.httpRequest));
+                if (resp == null) return;
+                if (isWsMessageEntry(e)) {
+                    api.comparer().sendToComparer(resp.toByteArray());
+                } else {
+                    api.comparer().sendToComparer(comparerBytesForResponse(resp, req));
+                }
             }
         } catch (Throwable t) { logErr("sendToComparer: " + safeMsg(t)); }
     }
 
     private void doActiveScan() {
         ComintTrafficEntry e = selectedEntry();
-        if (e == null || e.httpRequest == null) return;
+        if (e == null) return;
         try {
+            HttpRequest req = effectiveRequestForTool(e);
+            if (req == null) return;
             // R16: Active scan gets the decoded body but keeps the original Content-Type
             // so the AuditInsertionPointProvider re-encodes back to wire bytes for each
             // payload trial. (Repeater/Intruder change CT to application/json; Scanner does not.)
-            HttpRequest scanRequest = decodeRequestForTool(e.httpRequest, false);
+            HttpRequest scanRequest = isWsMessageEntry(e) ? req : decodeRequestForTool(req, false);
             AuditConfiguration cfg = AuditConfiguration.auditConfiguration(
                     BuiltInAuditConfiguration.LEGACY_ACTIVE_AUDIT_CHECKS);
             Audit audit = api.scanner().startAudit(cfg);
             if (audit != null) audit.addRequest(scanRequest);
         } catch (Throwable t) { logErr("doActiveScan: " + safeMsg(t)); }
+    }
+
+    /** True when the entry is a native WebSocket message frame (WS_TEXT/WS_BINARY). */
+    private static boolean isWsMessageEntry(ComintTrafficEntry e) {
+        return e != null
+                && (e.kind == ComintTrafficEntry.Kind.WS_TEXT
+                    || e.kind == ComintTrafficEntry.Kind.WS_BINARY);
+    }
+
+    /** HTTP request to feed Send-to-tool actions. For HTTP entries this is just the
+     *  stored wire-format request; for native WebSocket frames we synthesize a bridge
+     *  POST so the user's right-click sends a working bridge request to Repeater/etc. */
+    private HttpRequest effectiveRequestForTool(ComintTrafficEntry e) {
+        if (e == null) return null;
+        if (e.kind == ComintTrafficEntry.Kind.HTTP) return e.httpRequest;
+        if (!isWsMessageEntry(e)) return null;
+        byte[] body;
+        String contentType;
+        if (e.kind == ComintTrafficEntry.Kind.WS_TEXT) {
+            body = e.wsTextPayload == null ? new byte[0]
+                    : e.wsTextPayload.getBytes(StandardCharsets.UTF_8);
+            contentType = "application/json; charset=utf-8";
+        } else {
+            body = e.wsBinaryPayload == null ? new byte[0] : e.wsBinaryPayload;
+            contentType = "application/octet-stream";
+        }
+        int port = safeBridgePort();
+        HttpService svc = HttpService.httpService("127.0.0.1", port, false);
+        return synthesizeWsBridgeRequest(svc, port, wsTargetUrlFor(e), body, contentType);
+    }
+
+    /** Matching synthesized response for WS frame entries; null for plain HTTP entries
+     *  (which use {@code e.httpResponse} via {@link #effectiveResponseForTool}). */
+    private HttpResponse effectiveResponseForTool(ComintTrafficEntry e) {
+        if (e == null) return null;
+        if (e.kind == ComintTrafficEntry.Kind.HTTP) return e.httpResponse;
+        if (!isWsMessageEntry(e)) return null;
+        boolean clientToServer = "WS →".equals(e.method);
+        byte[] body;
+        String contentType;
+        if (e.kind == ComintTrafficEntry.Kind.WS_TEXT) {
+            body = e.wsTextPayload == null ? new byte[0]
+                    : e.wsTextPayload.getBytes(StandardCharsets.UTF_8);
+            contentType = "application/json; charset=utf-8";
+        } else {
+            body = e.wsBinaryPayload == null ? new byte[0] : e.wsBinaryPayload;
+            contentType = "application/octet-stream";
+        }
+        return synthesizeWsBridgeResponse(body, contentType, clientToServer);
     }
 
     /**
@@ -782,10 +1049,16 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
                 // the request line). Strip those framing headers, force exact
                 // Content-Type, then let HttpMessageFormatter recompute Content-Length
                 // and emit a clean CRLF-separated message.
+                // R10 (FIX 4): record the original Content-Type so ComintHttpHandler
+                // can re-encode the JSON body back to the wire format on send.
+                String origCt = CodecUtil.safeContentType(req);
                 HttpRequest sanitized = req
                         .withRemovedHeader("Transfer-Encoding")
                         .withRemovedHeader("Content-Encoding")
                         .withHeader("Content-Type", "application/json");
+                if (origCt != null && !origCt.isEmpty()) {
+                    sanitized = sanitized.withHeader("X-COMINT-Original-Content-Type", origCt);
+                }
                 byte[] full = HttpMessageFormatter.formatRequest(sanitized, decodedBytes);
                 full = HttpMessageFormatter.reconstructWithEncodedBody(full, decodedBytes);
                 burp.api.montoya.http.HttpService service = req.httpService();
@@ -919,16 +1192,15 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
         } catch (Throwable ignored) {}
         // R23: status pattern is part of the language-keyed translation set; refresh now.
         try { updateStatusLabel(); } catch (Throwable ignored) {}
+        // Audit fix: bridgeToggleButton's text was hard-coded English at construction
+        // (line ~301) — without this refresh, a user with saved language=ru/ja/etc
+        // sees "Start"/"Stop" until they toggle the bridge. refreshBridgeStatus reads
+        // currentLangIdx, which we just set above.
+        try { refreshBridgeStatus(); } catch (Throwable ignored) {}
         try {
             PersistedObject ext = api.persistence().extensionData();
             if (ext != null) ext.setString(PERSISTENCE_LANG_KEY, LANG_CODES[idx]);
         } catch (Throwable ignored) {}
-    }
-
-    /** Translation lookup for one of the L_xxx string indices using the current language. */
-    private String tr(int index) {
-        int idx = (currentLangIdx >= 0 && currentLangIdx < LABELS.length) ? currentLangIdx : 0;
-        return LABELS[idx][index];
     }
 
     private int loadSavedLanguageIndex() {
@@ -959,6 +1231,53 @@ public class ComintTrafficPanel extends JPanel implements ComintTrafficListener 
     }
 
     public Component component() { return this; }
+
+    // ---- WS-4 (revised) inline bridge controls ----
+
+    private void toggleBridge() {
+        if (wsBridge == null) return;
+        try {
+            if (wsBridge.isRunning()) {
+                wsBridge.stop();
+            } else {
+                int port;
+                try { port = Integer.parseInt(bridgePortField.getText().trim()); }
+                catch (NumberFormatException nfe) { port = ComintWsBridge.DEFAULT_PORT; }
+                if (port < 1 || port > 65535) port = ComintWsBridge.DEFAULT_PORT;
+                wsBridge.start(port);
+            }
+        } catch (Throwable t) {
+            logErr("toggleBridge: " + safeMsg(t));
+        }
+        refreshBridgeStatus();
+    }
+
+    private void refreshBridgeStatus() {
+        if (wsBridge == null) return;
+        try {
+            boolean running = wsBridge.isRunning();
+            if (bridgeToggleButton != null) {
+                String[] L = LABELS[(currentLangIdx >= 0 && currentLangIdx < LABELS.length) ? currentLangIdx : 0];
+                bridgeToggleButton.setText(running ? L[L_STOP] : L[L_START]);
+            }
+            if (bridgeStatusDot != null) {
+                bridgeStatusDot.setForeground(running ? new Color(0x22C55E) : new Color(0xEF4444));
+                bridgeStatusDot.setToolTipText(running
+                        ? "Bridge running on 127.0.0.1:" + wsBridge.port()
+                        : "Bridge stopped");
+            }
+            if (bridgePortField != null && !bridgePortField.isFocusOwner()) {
+                String shown = bridgePortField.getText();
+                String actual = Integer.toString(wsBridge.port());
+                if (!actual.equals(shown)) bridgePortField.setText(actual);
+            }
+        } catch (Throwable ignored) {}
+    }
+
+    /** Called from {@link com.comint.ComintExtension#extensionUnloaded()}. */
+    public void teardownBridgeStatusTimer() {
+        try { if (bridgeStatusTimer != null) bridgeStatusTimer.stop(); } catch (Throwable ignored) {}
+    }
 
     private void logErr(String msg) {
         try { api.logging().logToError("COMINT Traffic: " + msg); } catch (Throwable ignored) {}
