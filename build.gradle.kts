@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.comint"
-version = "1.0.0"
+version = "2.0.0"
 
 repositories {
     mavenCentral()
@@ -41,6 +41,8 @@ dependencies {
 }
 
 tasks.shadowJar {
+    archiveBaseName.set("comint")
+    archiveClassifier.set("")
     mergeServiceFiles()
     // Burp provides Montoya at runtime — never bundle it
     dependencies {
